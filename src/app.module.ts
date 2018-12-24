@@ -6,6 +6,7 @@ import { DbHelperModule } from './db-helper/db-helper.module';
 import { WinstonModule } from 'nest-winston';
 import { CurrentDateTimeModule } from './current-date-time/current-date-time.module';
 import { NodeMailerModule } from './nodemailer/nodemailer.module';
+import { CronJobModule } from './cron-job/cron-job.module';
 import * as Winston from 'winston';
 
 @Module({
@@ -25,6 +26,7 @@ import * as Winston from 'winston';
     }),
     CurrentDateTimeModule,
     NodeMailerModule,
+    CronJobModule,
   ],
   controllers: [],
   providers: [],
