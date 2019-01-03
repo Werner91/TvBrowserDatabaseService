@@ -35,7 +35,7 @@ export class DbHelperService {
             where: { images: IsNull(), 
                      duration_sec: LessThan(3600)
                     },
-            take: 41 
+            take: 10
         });
         return data;
     }
@@ -49,6 +49,15 @@ export class DbHelperService {
             take: 10 
         });
         return data;
+    }
+
+    async updateImageNames(imageName: string, titleName: string){
+        const data = await this.epgDataRepository
+                                .createQueryBuilder()
+                                .update()
+                                .set({images: imageName})
+                                .where("title = :title", {title: titleName})
+                                .execute();
     }
 
     async writeChannels(channels: ChannelsDTO[]){

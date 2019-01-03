@@ -1,5 +1,7 @@
 import { retryWhen, mergeMap, delay, take, catchError}  from 'rxjs/operators';
 import { Injectable, HttpService, Inject } from '@nestjs/common';
+import * as path from 'path';
+import * as fs from 'fs';
 import { API } from '../constants/api.constants';
 import { Observable, of, throwError } from 'rxjs';
 import { AxiosResponse } from 'axios';
@@ -9,7 +11,7 @@ import { Logger } from 'winston';
 import { CurrentDateTimeService } from '../current-date-time/current-date-time.service';
 import { NodeMailerService } from '../nodemailer/nodemailer.service';
 import { ChannelsDTO } from './DTOs/channelsDTO';
-import { isBuffer } from 'util';
+
 
 
 @Injectable()
@@ -97,14 +99,22 @@ export class UpdateService {
         }
     }
 
-    getImagesFromMovieDB(title: string, showOrMovie: string): Observable<AxiosResponse>{
+    getImageURLFromMovieDB(title: string, showOrMovie: string): Observable<AxiosResponse>{
         try {
             /*
             https://api.themoviedb.org/3/movie/550?api_key=44449b26f9060de49b1cbe419e8409e2&language=de-DE&append_to_response=images&include_image_language=de,images
             https://image.tmdb.org/t/p/w300/2CMVaVmlsovUePAi3yMiqk2x2sP.jpg
             */
            //console.log('https://api.themoviedb.org/3/search/' + showOrMovie + '?api_key=44449b26f9060de49b1cbe419e8409e2&language=de-DE&query=' + encodeURIComponent(title) + '&page=1');
-           return this.httpService.get('https://api.themoviedb.org/3/search/' + showOrMovie + '?api_key=44449b26f9060de49b1cbe419e8409e2&language=de-DE&query=' + encodeURIComponent(title) + '&page=1');
+           return this.httpService.get('https://api.themoviedb.org/3/search/' + showOrMovie + '?api_key=' + API.API_KEY + '&language=de-DE&query=' + encodeURIComponent(title) + '&page=1');
+        } catch (error) {
+            this.errorHandling(error);
+        }
+    }
+
+    getImageFromMovieDB(imageName: string): Observable<AxiosResponse>{
+        try {
+            return this.httpService.get('https://image.tmdb.org/t/p/'+ API.IMAGE_SIZE + '/' + imageName, { responseType: 'arraybuffer' })
         } catch (error) {
             this.errorHandling(error);
         }
@@ -129,7 +139,7 @@ export class UpdateService {
     imageController(epgData: EpgDataDTO[], showOrMovie: string){
         var retryAfterMilliSeconds = 10000;
         epgData.forEach( (data) => {
-            this.getImagesFromMovieDB(data.title, showOrMovie).pipe(
+            this.getImageURLFromMovieDB(data.title, showOrMovie).pipe(
                 retryWhen((error) => {
                     return error.pipe(
                         mergeMap((error: any) => {
@@ -147,16 +157,30 @@ export class UpdateService {
                                     this.errorHandling(error)
                                     return throwError(error);
                                 }
-                                console.log(data.title)
                                 return of("error");
                             }),
                         delay(retryAfterMilliSeconds),
-                        take(6)
+                        take(375) // 15000 / 40 = 375
                     )
             }))
             .subscribe( (res) => {
-                console.log(res.status);
-                console.log(res.headers);
+                var imageName = 'default.png'
+                if(res.data.results.length > 0 && res.data.results[0].poster_path !== null){
+                    imageName = res.data.results[0].poster_path.substr(1);
+                }
+                this.dbHelper.updateImageNames(imageName, data.title);
+                if(imageName !== 'default.png'){
+                    this.getImageFromMovieDB(imageName).subscribe((image) => {
+                        fs.writeFile('images/' + imageName, image.data, function(err){
+                            if(err){
+                                this.errorHandling(err);
+                            }else{
+                                console.log("saved successfull")
+                                return;
+                            }
+                        })
+                    });
+                }
             });
         })
     }
