@@ -3,8 +3,14 @@ import { Entity, Column, PrimaryColumn, PrimaryGeneratedColumn } from 'typeorm';
 @Entity('epg_data')
 export class EpgDataEntity {
 
-  @PrimaryColumn({type: "int"})
+  @Column({type: "int"})
   id: number;
+
+  @PrimaryColumn({type: "int"})
+  begin_timestamp_UTC: number;
+
+  @PrimaryColumn({type: "varchar"})
+  sref: string;
 
   @Column({type: "text", nullable: true})
   sname: string;
@@ -12,17 +18,11 @@ export class EpgDataEntity {
   @Column({type: "text", nullable: true})
   title: string;
 
-  @Column({type: "int", nullable: true})
-  begin_timestamp: number;
+  @Column({type: "text", nullable: true})
+  begin_timestamp_formated_UTC: string;
 
   @Column({type: "text", nullable: true})
   begin_timestamp_formated: string;
-
-  @Column({type: "int", nullable: true})
-  now_timestamp: number;
-
-  @Column({type: "text", nullable: true})
-  sref: string;
 
   @Column({type: "int", nullable: true})
   duration_sec: number;
@@ -32,4 +32,7 @@ export class EpgDataEntity {
 
   @Column({type: "text", nullable: true})
   longdesc: string;
+
+  @Column({type: "text", nullable: true})
+  images: string;
 }

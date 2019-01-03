@@ -3,7 +3,7 @@ import { EpgDataDTO } from '../update/DTOs/epgDataDTO';
 import { EpgDataEntity } from '../entitys/epgData.entity';
 import { ChannelsEntity } from '../entitys/channels.entity' 
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThan, MoreThan, IsNull} from 'typeorm';
 import { ChannelsDTO } from 'src/update/DTOs/channelsDTO';
 
 @Injectable()
@@ -14,11 +14,11 @@ export class DbHelperService {
         @InjectRepository(ChannelsEntity) private readonly channelsRepository: Repository<ChannelsEntity>, 
     ){}
 
-    async clearOldEPGdData(begin_timestamp: number){
+    async clearOldEPGData(begin_ts: number){
         const data = await this.epgDataRepository
                                 .createQueryBuilder()
                                 .delete()
-                                .where("begin_timestamp < begin_timestamp", {begin_timestamp})
+                                .where("begin_timestamp_UTC < :begin_timestamp_UTC", {begin_timestamp_UTC: begin_ts})
                                 .execute();
         return {delete: true, data: data};
     }
@@ -27,6 +27,28 @@ export class DbHelperService {
         const data = await this.epgDataRepository.create(epgData);
         const response = await this.epgDataRepository.save(data);
         return response;
+    }
+
+    async getAllTvShowsWithoutImages(): Promise<EpgDataEntity[]>{
+        const data = await this.epgDataRepository.find({ 
+            select: ["title"],
+            where: { images: IsNull(), 
+                     duration_sec: LessThan(3600)
+                    },
+            take: 41 
+        });
+        return data;
+    }
+
+    async getAllMoviesWithoutImages(): Promise<EpgDataEntity[]>{
+        const data = await this.epgDataRepository.find({ 
+            select: ["title"],
+            where: { images: IsNull(), 
+                     duration_sec: MoreThan(3599),
+                    },
+            take: 10 
+        });
+        return data;
     }
 
     async writeChannels(channels: ChannelsDTO[]){

@@ -1,9 +1,9 @@
 export interface EpgDataDTO{
   sname: string;
   title: string;
-  begin_timestamp: number;
+  begin_timestamp_UTC: number;
+  begin_timestamp_formated_UTC: string;
   begin_timestamp_formated: string;
-  now_timestamp: number;
   sref: string;
   id: number;
   duration_sec: number;
