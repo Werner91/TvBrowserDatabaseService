@@ -1,9 +1,8 @@
-import { retryWhen, mergeMap, delay, take, catchError}  from 'rxjs/operators';
+import { retryWhen, mergeMap, delay, take}  from 'rxjs/operators';
 import { Injectable, HttpService, Inject } from '@nestjs/common';
-import * as path from 'path';
 import * as fs from 'fs';
 import { API } from '../constants/api.constants';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { AxiosResponse } from 'axios';
 import { EpgDataDTO } from './DTOs/epgDataDTO';
 import { DbHelperService } from 'src/db-helper/db-helper.service';
@@ -33,6 +32,9 @@ export class UpdateService {
                 //set values to save in database
                 var epgDataList: EpgDataDTO[] = [];
                 epgData.data.events.forEach(element => {
+                    if(element.title === ''){
+                        element.title = API.NO_TITLE;
+                    }
                     let epgDataDTO: EpgDataDTO = this.setEpgData(element);
                     epgDataList.push(epgDataDTO);
                 });
@@ -42,7 +44,6 @@ export class UpdateService {
                     //delete images which are no longer ued
                     console.log("Deleting old images....", 'update.service');
                     const imageList = await this.dbHelper.getImagesToDelete(timestamp);
-                    console.log(imageList);
                     imageList.forEach(imageName => {
                         this.deleteImageFromDisk(imageName.images);
                     });
@@ -65,7 +66,6 @@ export class UpdateService {
                     //duration > 60min (movies)
                     const moviesWithoutImages = await this.getAllMoviesWithoutImages();
                     this.imageController(moviesWithoutImages, 'movie');
-                
 
                 } catch(error){
                     this.errorHandling(error);
@@ -73,21 +73,37 @@ export class UpdateService {
             }
         });
 
-
         this.getChannels().subscribe( async(channels) => {
             if(channels.status == 200){
-                var channelsList: ChannelsDTO[] = [];
-                channels.data.services.forEach(element => {
-                    let channelsDTO: ChannelsDTO = this.setChannels(element);
-                    channelsList.push(channelsDTO);
-                });
                 try {
+                    var channelsList: ChannelsDTO[] = [];
+                    await channels.data.services.forEach(async (element) => {
+                        let shortName = element.servicename
+                        shortName = shortName.toLocaleLowerCase();
+                        shortName = shortName.replace(/\s|\.|\/|\-|\_|\(|\)/g,''); // remove all whitespaces
+                        shortName = shortName.replace(/\+/g,'plus'); // replace + with plus
+                        shortName = shortName.replace(/\&/g,'and'); // replace + with and
+                        shortName = shortName.replace(/\ü/g,'u'); // replace ü with u
+                        shortName = shortName.replace(/\ö/g,'o'); // replace ö with o
+                        shortName = shortName.replace(/\ä/g,'a'); // replace ä with a
+                        let logoName = await this.getChannelLogo(shortName);
+                        let channelsDTO: ChannelsDTO = this.setChannels(element, shortName, logoName);
+                        channelsList.push(channelsDTO);
+                    });
                     await this.dbHelper.writeChannels(channelsList);
                 } catch (error) {
                     this.errorHandling(error);
                 }
             }
         });
+    }
+
+    getChannelLogo(logoName){
+        const exists = fs.existsSync(API.PATH_TO_CHANNEL_LOGOS + logoName + '.png');
+        if(exists){
+            return logoName + '.png';
+        }
+        return null;
     }
 
     getEpgData(): Observable<AxiosResponse>{
@@ -108,11 +124,6 @@ export class UpdateService {
 
     getImageURLFromMovieDB(title: string, showOrMovie: string): Observable<AxiosResponse>{
         try {
-            /*
-            https://api.themoviedb.org/3/movie/550?api_key=44449b26f9060de49b1cbe419e8409e2&language=de-DE&append_to_response=images&include_image_language=de,images
-            https://image.tmdb.org/t/p/w300/2CMVaVmlsovUePAi3yMiqk2x2sP.jpg
-            */
-           //console.log('https://api.themoviedb.org/3/search/' + showOrMovie + '?api_key=44449b26f9060de49b1cbe419e8409e2&language=de-DE&query=' + encodeURIComponent(title) + '&page=1');
            return this.httpService.get('https://api.themoviedb.org/3/search/' + showOrMovie + '?api_key=' + API.API_KEY + '&language=de-DE&query=' + encodeURIComponent(title) + '&page=1');
         } catch (error) {
             this.errorHandling(error);
@@ -153,12 +164,12 @@ export class UpdateService {
                                     if(error.response.status === 429) {
                                         const retryAfter = error.response.headers;
                                         retryAfterMilliSeconds = +retryAfter['retry-after'] * 1000
-                                    }else{
+                                    } else {
                                         this.errorHandling(error)
                                     }
                                     return of("error").pipe(delay(retryAfterMilliSeconds));
                             }),
-                        take(375) // 15000 / 40 = 375
+                        take(20) // 15000 / 40 = 375
                     )
             }))
             .subscribe( (res) => {
@@ -222,12 +233,14 @@ export class UpdateService {
         return epgDataItem;
     }
 
-    setChannels(element: any): ChannelsDTO{
+    setChannels(element: any, shortName: string, logoName: string): ChannelsDTO{
         let channelsItem: ChannelsDTO = {
             servicereference: element.servicereference,
             program: element.program,
-            servicename: element.servicename,
             pos: element.pos,
+            servicename: element.servicename,
+            servicename_short: shortName,
+            service_logo: logoName
         }
         return channelsItem;
     }

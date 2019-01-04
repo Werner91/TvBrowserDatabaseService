@@ -1,6 +1,8 @@
 export interface ChannelsDTO{
     servicereference: string;
     program: number;
-    servicename: string;
     pos: number;
+    servicename: string;
+    servicename_short: string;
+    service_logo: string;
   }

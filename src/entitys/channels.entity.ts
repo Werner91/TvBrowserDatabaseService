@@ -9,9 +9,15 @@ export class ChannelsEntity {
   @Column({type: "text", nullable: true})
   servicename: string; 
 
+  @Column({type: "text", nullable: true})
+  servicename_short: string; 
+
   @Column({type: "int", nullable: true})
   program: number;
 
   @Column({type: "int", nullable: true})
   pos: number;
+
+  @Column({type: "text", nullable: true})
+  service_logo: string; 
 }
