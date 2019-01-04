@@ -17,6 +17,8 @@ import { ChannelsDTO } from './DTOs/channelsDTO';
 @Injectable()
 export class UpdateService {
 
+    private startTime;
+
     constructor(
         @Inject('winston') private readonly winstonLogger: Logger, 
         private readonly httpService: HttpService, 
@@ -35,13 +37,19 @@ export class UpdateService {
                     epgDataList.push(epgDataDTO);
                 });
                 try{
+                    const timestamp = this.generateDateLimitToDelete();
+
+                    //delete images which are no longer ued
+                    console.log("Deleting old images....", 'update.service');
+                    const imageList = await this.dbHelper.getImagesToDelete(timestamp);
+                    console.log(imageList);
+                    imageList.forEach(imageName => {
+                        this.deleteImageFromDisk(imageName.images);
+                    });
+
                     //delete all data which begin_timestamp is older than today
-                    const date = new Date();
-                    date.setHours(0,0,0,0);
-                    const begin_timestamp = Math.round((new Date(date)).getTime() / 1000);
-                    console.log("Start deleting old data from database ....", 'update.service');
-                    await this.dbHelper.clearOldEPGData(begin_timestamp);
-                    console.log("Finished deleting old data from database", 'update.service');
+                    console.log("Deleting old data from database ....", 'update.service');
+                    await this.dbHelper.clearOldEPGData(timestamp);
 
                     //write new epg data to server
                     console.log("Start writing to database ....", 'update.service');
@@ -50,15 +58,14 @@ export class UpdateService {
 
                     //set images to epgdata
                     // duration < 60min (tv shows)
+                    this.startTime = (new Date()).getTime();
                     const tvShowsWithoutImages = await this.getAllTvShowsWithoutImages();
                     this.imageController(tvShowsWithoutImages, 'tv');
 
-
-                    /*
                     //duration > 60min (movies)
                     const moviesWithoutImages = await this.getAllMoviesWithoutImages();
-                    this.imageController(tvShowsWithoutImages, 'movie');
-                    */
+                    this.imageController(moviesWithoutImages, 'movie');
+                
 
                 } catch(error){
                     this.errorHandling(error);
@@ -143,46 +150,58 @@ export class UpdateService {
                 retryWhen((error) => {
                     return error.pipe(
                         mergeMap((error: any) => {
-                                /*
-                                
-                                    const retryAfter = error.response.headers;
-                                    retryAfterMilliSeconds = +retryAfter['retry-after'] * 1000
-                                    console.log(retryAfterMilliSeconds);
-                                    console.log(data.title);
-                                }else{
-                                    
-                                }
-                                */
-                                if(error.response.status !== 429) {
-                                    this.errorHandling(error)
-                                    return throwError(error);
-                                }
-                                return of("error");
+                                    if(error.response.status === 429) {
+                                        const retryAfter = error.response.headers;
+                                        retryAfterMilliSeconds = +retryAfter['retry-after'] * 1000
+                                    }else{
+                                        this.errorHandling(error)
+                                    }
+                                    return of("error").pipe(delay(retryAfterMilliSeconds));
                             }),
-                        delay(retryAfterMilliSeconds),
                         take(375) // 15000 / 40 = 375
                     )
             }))
             .subscribe( (res) => {
-                var imageName = 'default.png'
+                const elapsedTime = Math.round(((new Date()).getTime() - this.startTime) / 1000);
+                console.log(`'${data.title}' is Ok - total elapsed time ${elapsedTime} seconds`);
+
+                var imageName = API.DEFAULT_IMAGE;
                 if(res.data.results.length > 0 && res.data.results[0].poster_path !== null){
                     imageName = res.data.results[0].poster_path.substr(1);
                 }
                 this.dbHelper.updateImageNames(imageName, data.title);
-                if(imageName !== 'default.png'){
+                if(imageName !== API.DEFAULT_IMAGE){
                     this.getImageFromMovieDB(imageName).subscribe((image) => {
-                        fs.writeFile('images/' + imageName, image.data, function(err){
-                            if(err){
-                                this.errorHandling(err);
-                            }else{
-                                console.log("saved successfull")
-                                return;
-                            }
-                        })
+                        this.writeImagesToDisk(imageName, image.data);
                     });
                 }
             });
         })
+    }
+
+    writeImagesToDisk(imageName: string, image: any){
+        fs.writeFile(API.PATH_TO_IMAGES + imageName, image, function(err){
+            if(err){
+                this.errorHandling(err);
+                return;
+            }else{
+                console.log("saved successfull")
+                return;
+            }
+        })
+    }
+
+    deleteImageFromDisk(imageName: string){
+        fs.unlink(API.PATH_TO_IMAGES + imageName, function(err){
+            console.log(API.PATH_TO_IMAGES + imageName);
+            if(err){
+                this.errorHandling(err);
+                return;
+            } else {
+                console.log(`deleted '${imageName}' successfull`);
+                return;
+            }
+        });
     }
 
     setEpgData(element: any): EpgDataDTO{
@@ -211,6 +230,12 @@ export class UpdateService {
             pos: element.pos,
         }
         return channelsItem;
+    }
+
+    generateDateLimitToDelete(): number{
+        const date = new Date();
+        date.setHours(0,0,0,0);
+        return Math.round((new Date(date)).getTime() / 1000);
     }
 
     dateFormatter(date: Date): string{
