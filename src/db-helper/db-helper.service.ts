@@ -50,7 +50,7 @@ export class DbHelperService {
                                 .where({ images: IsNull(), 
                                          duration_sec: LessThan(3600)
                                 })
-                                .take(42)
+                                .take(10)
                                 .getRawMany()
         return data;
     }
@@ -80,5 +80,10 @@ export class DbHelperService {
         const data = await this.channelsRepository.create(channels);
         const response = await this.channelsRepository.save(data);
         return response;
+    }
+
+    async getAllChannels(): Promise<ChannelsEntity[]>{
+        const data = await this.channelsRepository.find()
+        return data;
     }
 }

@@ -1,4 +1,4 @@
-import { retryWhen, mergeMap, delay, take}  from 'rxjs/operators';
+import { retryWhen, mergeMap, delay, take, finalize}  from 'rxjs/operators';
 import { Injectable, HttpService, Inject } from '@nestjs/common';
 import * as fs from 'fs';
 import { API } from '../constants/api.constants';
@@ -17,6 +17,7 @@ import { ChannelsDTO } from './DTOs/channelsDTO';
 export class UpdateService {
 
     private startTime;
+    private errorList = [];
 
     constructor(
         @Inject('winston') private readonly winstonLogger: Logger, 
@@ -124,7 +125,7 @@ export class UpdateService {
 
     getImageURLFromMovieDB(title: string, showOrMovie: string): Observable<AxiosResponse>{
         try {
-           return this.httpService.get('https://api.themoviedb.org/3/search/' + showOrMovie + '?api_key=' + API.API_KEY + '&language=de-DE&query=' + encodeURIComponent(title) + '&page=1');
+           return this.httpService.get('https://ap.themoviedb.org/3/search/' + showOrMovie + '?api_key=' + API.API_KEY + '&language=de-DE&query=' + encodeURIComponent(title) + '&page=1');
         } catch (error) {
             this.errorHandling(error);
         }
@@ -156,23 +157,33 @@ export class UpdateService {
 
     imageController(epgData: EpgDataDTO[], showOrMovie: string){
         var retryAfterMilliSeconds = 10000;
-        epgData.forEach( (data) => {
+        epgData.forEach( (data, idx, array) => {
             this.getImageURLFromMovieDB(data.title, showOrMovie).pipe(
                 retryWhen((error) => {
                     return error.pipe(
                         mergeMap((error: any) => {
+                                if(error.response !== undefined){
                                     if(error.response.status === 429) {
                                         const retryAfter = error.response.headers;
                                         retryAfterMilliSeconds = +retryAfter['retry-after'] * 1000
                                     } else {
-                                        this.errorHandling(error)
+                                        this.errorHandlerForImageController(error);
                                     }
-                                    return of("error").pipe(delay(retryAfterMilliSeconds));
-                            }),
+                                }else{
+                                    this.errorHandlerForImageController(error);
+                                }
+                                return of("error").pipe(delay(retryAfterMilliSeconds));
+                        }),
+                        finalize(() => {
+                            console.log("finalize");
+                            if (idx === array.length - 1 && this.errorList.length > 0){ 
+                                this.sendErrorMail(this.errorList);
+                            }
+                        }),
                         take(20) // 15000 / 40 = 375
                     )
-            }))
-            .subscribe( (res) => {
+                })
+            ).subscribe( (res) => {
                 const elapsedTime = Math.round(((new Date()).getTime() - this.startTime) / 1000);
                 console.log(`'${data.title}' is Ok - total elapsed time ${elapsedTime} seconds`);
 
@@ -185,6 +196,9 @@ export class UpdateService {
                     this.getImageFromMovieDB(imageName).subscribe((image) => {
                         this.writeImagesToDisk(imageName, image.data);
                     });
+                }
+                if (idx === array.length - 1 && this.errorList.length > 0){ 
+                    this.sendErrorMail(this.errorList);
                 }
             });
         })
@@ -264,5 +278,15 @@ export class UpdateService {
     errorHandling(error: string){
         this.winstonLogger.log('error', this.currentDateTimeService.getCurrentDateTime().toString() + ' | ' + UpdateService.name + ' | ' + error);
         this.nodeMailerService.sendMail(' | ' + UpdateService.name + ' | ' + error);
+    }
+
+    errorHandlerForImageController(error: string){
+        this.errorList.push(error);
+        this.winstonLogger.log('error', this.currentDateTimeService.getCurrentDateTime().toString() + ' | ' + UpdateService.name + ' | ' + error);
+    }
+
+    sendErrorMail(errorList: string[]){
+        this.nodeMailerService.sendMail(' | ' + UpdateService.name + ' | ' + errorList.toString());
+        this.errorList.length = 0;
     }
 }
