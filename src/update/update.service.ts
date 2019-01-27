@@ -1,5 +1,5 @@
 import { retryWhen, mergeMap, delay, take, finalize}  from 'rxjs/operators';
-import { Injectable, HttpService, Inject } from '@nestjs/common';
+import { Injectable, HttpService, Inject, Headers } from '@nestjs/common';
 import * as fs from 'fs';
 import { API } from '../constants/api.constants';
 import { Observable, of } from 'rxjs';
@@ -25,7 +25,14 @@ export class UpdateService {
         private readonly dbHelper: DbHelperService,
         private readonly currentDateTimeService: CurrentDateTimeService,
         private readonly nodeMailerService: NodeMailerService
-    ){}
+    ){
+        this.getTokenForTvDB()
+            .subscribe(async(resp) => {
+                if(resp.status == 200){
+                    API.TVDB_TOKEN = resp.data.token;
+                }
+            });
+    }
 
     runUpdate() {
         this.getEpgData().subscribe( async(epgData) => {
@@ -58,15 +65,15 @@ export class UpdateService {
                     await this.dbHelper.writeNewEPG(epgDataList)
                     console.log("Finished writing to database", 'update.service');
 
-                    //set images to epgdata
+                    //set images from the movie db
                     // duration < 60min (tv shows)
                     this.startTime = (new Date()).getTime();
                     const tvShowsWithoutImages = await this.getAllTvShowsWithoutImages();
-                    this.imageController(tvShowsWithoutImages, 'tv');
+                    await this.imageController(tvShowsWithoutImages, 'tv');
 
                     //duration > 60min (movies)
                     const moviesWithoutImages = await this.getAllMoviesWithoutImages();
-                    this.imageController(moviesWithoutImages, 'movie');
+                    await this.imageController(moviesWithoutImages, 'movie');
 
                 } catch(error){
                     this.errorHandling(error);
@@ -125,7 +132,7 @@ export class UpdateService {
 
     getImageURLFromMovieDB(title: string, showOrMovie: string): Observable<AxiosResponse>{
         try {
-           return this.httpService.get('https://ap.themoviedb.org/3/search/' + showOrMovie + '?api_key=' + API.API_KEY + '&language=de-DE&query=' + encodeURIComponent(title) + '&page=1');
+           return this.httpService.get(API.MOVIEDB_API_PREFIX + showOrMovie + '?api_key=' + API.MOVIEDB_API_KEY + '&language=de-DE&query=' + encodeURIComponent(title) + '&page=1');
         } catch (error) {
             this.errorHandling(error);
         }
@@ -133,7 +140,35 @@ export class UpdateService {
 
     getImageFromMovieDB(imageName: string): Observable<AxiosResponse>{
         try {
-            return this.httpService.get('https://image.tmdb.org/t/p/'+ API.IMAGE_SIZE + '/' + imageName, { responseType: 'arraybuffer' })
+            return this.httpService.get(API.MOVIEDB_API_IMAGE_PREFIX + API.IMAGE_SIZE + '/' + imageName, { responseType: 'arraybuffer' })
+        } catch (error) {
+            this.errorHandling(error);
+        }
+    }
+
+    getTokenForTvDB(){
+        const requestOptions = {                                                                                                                                                                                 
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Access-Control-Allow-Headers': 'Content-Type',
+              } 
+          };
+          const requestBody = JSON.stringify({
+                                    apikey: API.TVDB_API_KEY,
+                                    username: API.TVDB_USERNAME,
+                                    userkey: API.TVDB_USERKEY
+                                })
+        try {      
+            return this.httpService.post('https://api.thetvdb.com/login', requestBody, requestOptions)
+        } catch (error) {
+            this.errorHandling(error);
+        }
+    }
+
+    getSeriesIDFromTvDB(title: string){
+        try {
+            return this.httpService.get(API.TVDB_PREFIX + title)
         } catch (error) {
             this.errorHandling(error);
         }
@@ -175,7 +210,6 @@ export class UpdateService {
                                 return of("error").pipe(delay(retryAfterMilliSeconds));
                         }),
                         finalize(() => {
-                            console.log("finalize");
                             if (idx === array.length - 1 && this.errorList.length > 0){ 
                                 this.sendErrorMail(this.errorList);
                             }
@@ -187,15 +221,20 @@ export class UpdateService {
                 const elapsedTime = Math.round(((new Date()).getTime() - this.startTime) / 1000);
                 console.log(`'${data.title}' is Ok - total elapsed time ${elapsedTime} seconds`);
 
-                var imageName = API.DEFAULT_IMAGE;
+                //var imageName = API.DEFAULT_IMAGE;
+                var imageName = "";
                 if(res.data.results.length > 0 && res.data.results[0].poster_path !== null){
                     imageName = res.data.results[0].poster_path.substr(1);
+                    this.dbHelper.updateImageNames(imageName, data.title);
                 }
-                this.dbHelper.updateImageNames(imageName, data.title);
-                if(imageName !== API.DEFAULT_IMAGE){
+                //if(imageName !== API.DEFAULT_IMAGE){
+                if(imageName !== ""){
                     this.getImageFromMovieDB(imageName).subscribe((image) => {
                         this.writeImagesToDisk(imageName, image.data);
                     });
+                }
+                if(imageName == ""){
+                    console.log(API.TVDB_TOKEN);
                 }
                 if (idx === array.length - 1 && this.errorList.length > 0){ 
                     this.sendErrorMail(this.errorList);
